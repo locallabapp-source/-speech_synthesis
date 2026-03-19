@@ -2,8 +2,9 @@ import os
 import tempfile
 
 import duckdb
+import pygwalker as pyg_module
 from pygwalker.data_parsers.database_parser import Connector
-
+pn.extension('ipywidgets') 
 
 def _visualize_record(self, record):
     self.viz_counter += 1
@@ -29,14 +30,20 @@ def _visualize_record(self, record):
             """DuckDB ファイルを SQLAlchemy Connector 経由で参照する（DataFrame を渡さない）"""
             return Connector(
                 url=f"duckdb:///{temp_db_path}",
-                view_sql="SELECT * FROM viz_display",
+                view_sql="SELECT * FROM viz_display USING SAMPLE reservoir(1000 ROWS) REPEATABLE(42)",
             )
 
-        pyg_pane = pn.pane.HTML(
-            pyg.to_html(make_connector()),
-            sizing_mode='stretch_both',
-            min_height=800,
-        )
+        try:
+            # pygwalker >= 0.4.0 (anywidget) + Panel ipywidgets 対応の場合
+            walker = pyg_module.walk(make_connector(), kernel_computation=True)
+            pyg_pane = pn.panel(walker, sizing_mode='stretch_both', min_height=800)
+        except Exception:
+            # フォールバック: 静的HTML（1000行制限あり）
+            pyg_pane = pn.pane.HTML(
+                pyg.to_html(make_connector()),
+                sizing_mode='stretch_both',
+                min_height=800,
+            )
         file_input = pn.widgets.FileInput(accept='.csv')
 
         def load_and_merge_csv(event):
@@ -60,7 +67,11 @@ def _visualize_record(self, record):
                             "CREATE OR REPLACE TABLE viz_display AS SELECT * FROM combined_df"
                         )
 
-                    pyg_pane.object = pyg.to_html(make_connector())
+                    try:
+                        new_walker = pyg_module.walk(make_connector(), kernel_computation=True)
+                        pyg_pane.object = new_walker
+                    except Exception:
+                        pyg_pane.object = pyg.to_html(make_connector())
                     pn.state.notifications.success("CSVデータを読み込み、表示を更新しました。")
                 except Exception as e:
                     logger.debug(f"エラー: {e}")
